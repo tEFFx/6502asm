@@ -58,7 +58,14 @@ namespace _6502assembler {
             }
         };
 
-        //Add support for branch instructions and more importantly labels!
+        static OpCodeBranch BPL = new OpCodeBranch("bpl", 0x10);
+        static OpCodeBranch BMI = new OpCodeBranch("bmi", 0x30);
+        static OpCodeBranch BVC = new OpCodeBranch("bvc", 0x50);
+        static OpCodeBranch BVS = new OpCodeBranch("bvs", 0x70);
+        static OpCodeBranch BCC = new OpCodeBranch("bcc", 0x90);
+        static OpCodeBranch BCS = new OpCodeBranch("bcs", 0xB0);
+        static OpCodeBranch BNE = new OpCodeBranch("bne", 0xD0);
+        static OpCodeBranch BEQ = new OpCodeBranch("beq", 0xF0);
 
         static OpCode BRK = new OpCode("brk") {
             modes = new Dictionary<OpCode.Mode, byte>() {
@@ -263,7 +270,7 @@ namespace _6502assembler {
 
         static OpCode INX = new OpCode("inx") {
             modes = new Dictionary<OpCode.Mode, byte>() {
-                { OpCode.Mode.Implied, 0xEA }
+                { OpCode.Mode.Implied, 0xE8 }
             }
         };
 

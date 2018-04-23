@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace _6502assembler {
     class OpCode {
-        public enum Mode { Invalid, Implied, Immediate, ZeroPage, ZeroPageX, ZeroPageY, Absolute, AbsoluteX, AbsoluteY, Indirect, IndirectX, IndirectY }
+        public enum Mode { Invalid, Implied, Immediate, ZeroPage, ZeroPageX, ZeroPageY, Absolute, AbsoluteX, AbsoluteY, Indirect, IndirectX, IndirectY, Branch }
         public enum Result { Success, UnsupportedMode, InvalidData, SyntaxError }
         public string id { get; private set; }
         public Dictionary<Mode, byte> modes { get; set; }
@@ -16,18 +16,14 @@ namespace _6502assembler {
             OpCodes.instances.Add(id, this);
         }
 
-        public Result TryParse(string line, out byte[] bytes) {
-            Mode mode = Mode.Invalid;
-
-            bytes = new byte[0];
+        public virtual Result TryParse(string line, bool containsSymbol, out Instruction instruction) {
+            instruction = new Instruction(this);
+            instruction.mode = Mode.Invalid;
             line = line.ToLower();
 
             if(line == id) {
-                mode = Mode.Implied;
-                if(TryGetBytes(mode, 0, ref bytes))
-                    return Result.Success;
-
-                return Result.UnsupportedMode;
+                instruction.mode = Mode.Implied;
+                return Result.Success;
             }
 
             if(line.Length <= id.Length)
@@ -37,83 +33,96 @@ namespace _6502assembler {
             line = line.Substring(id.Length + 1);
 
             if(line.StartsWith("#")) {
-                mode = Mode.Immediate;
+                instruction.mode = Mode.Immediate;
                 line = line.Substring(1);
             } else if(line.StartsWith("(")) {
                 if(line.EndsWith(",x)"))
-                    mode = Mode.IndirectX;
+                    instruction.mode = Mode.IndirectX;
                 else if(line.EndsWith("),y"))
-                    mode = Mode.IndirectY;
+                    instruction.mode = Mode.IndirectY;
                 else
-                    mode = Mode.Indirect;
+                    instruction.mode = Mode.Indirect;
 
                 line = line.Substring(1);
-                line = line.Remove(mode != Mode.Indirect ? line.Length - 3 : line.Length - 1);
+                line = line.Remove(instruction.mode != Mode.Indirect ? line.Length - 3 : line.Length - 1);
             }
 
-            string dataString;
+            string data;
             if(line.Contains(",")) {
                 int commaIndex = line.IndexOf(",");
-                dataString = line.Remove(commaIndex);
+                data = line.Remove(commaIndex);
                 line = line.Substring(commaIndex);
             } else {
-                dataString = line;
+                data = line;
                 line = string.Empty;
             }
 
-            ushort data;
-            try {
-                if(dataString.StartsWith("$")) {
-                    data = Convert.ToUInt16(dataString.Substring(1), 16);
-                } else if(dataString.StartsWith("%")) {
-                    data = Convert.ToUInt16(dataString.Substring(1), 2);
-                } else {
-                    data = Convert.ToUInt16(dataString);
+            ushort value = 0;
+            if(!containsSymbol) {
+                try {
+                    data = data.Replace(" ", string.Empty);
+                    if(data.StartsWith("$")) {
+                        value = Convert.ToUInt16(data.Substring(1), 16);
+                    } else if(data.StartsWith("%")) {
+                        value = Convert.ToUInt16(data.Substring(1), 2);
+                    } else {
+                        value = Convert.ToUInt16(data);
+                    }
+                } catch {
+                    return Result.SyntaxError;
                 }
-            } catch {
-                return Result.SyntaxError;
+
+                instruction.value = value;
             }
 
-            if(mode == Mode.Invalid) {
-                if(data <= 255) {
+            if(instruction.mode == Mode.Invalid) {
+                if(!containsSymbol && value <= 255) {
                     if(line == string.Empty)
-                        mode = Mode.ZeroPage;
+                        instruction.mode = Mode.ZeroPage;
                     else if(line == ",x")
-                        mode = Mode.ZeroPageX;
+                        instruction.mode = Mode.ZeroPageX;
                     else if(line == ",y")
-                        mode = Mode.ZeroPageY;
+                        instruction.mode = Mode.ZeroPageY;
                 } else {
                     if(line == string.Empty)
-                        mode = Mode.Absolute;
+                        instruction.mode = Mode.Absolute;
                     else if(line == ",x")
-                        mode = Mode.AbsoluteX;
+                        instruction.mode = Mode.AbsoluteX;
                     else if(line == ",y")
-                        mode = Mode.AbsoluteY;
+                        instruction.mode = Mode.AbsoluteY;
                 }
-            } else if(data > 255) {
+            } else if(value > 255) {
                 //Immediate or indirect modes can only be 1 byte!
                 return Result.InvalidData;
             }
 
-            if(TryGetBytes(mode, data, ref bytes))
-                return Result.Success;
-
-            return Result.UnsupportedMode;
+            instruction.data = data;
+            instruction.symbol = containsSymbol;
+            return Result.Success;
         }
 
-        private bool TryGetBytes(Mode mode, ushort data, ref byte[] bytes) {
-            if(!modes.ContainsKey(mode))
+        public virtual bool TryGetMode(Mode mode, out byte hex) {
+            if(!modes.ContainsKey(mode)) {
+                hex = 0x00;
                 return false;
+            }
+
+            hex = modes[mode];
+            return true;
+        }
+
+        public virtual int GetLength(Mode mode) {
+            if(!modes.ContainsKey(mode))
+                return -1;
 
             byte hex = modes[mode];
 
             switch(mode) {
                 case Mode.Invalid:
-                    return false;
+                    return -1;
 
                 case Mode.Implied:
-                    bytes = new byte[1] { hex };
-                    return true;
+                    return 1;
 
                 case Mode.Immediate:
                 case Mode.ZeroPage:
@@ -121,22 +130,16 @@ namespace _6502assembler {
                 case Mode.ZeroPageY:
                 case Mode.IndirectX:
                 case Mode.IndirectY:
-                    bytes = new byte[2] { hex, (byte)data };
-                    return true;
+                    return 2;
 
                 case Mode.Absolute:
                 case Mode.AbsoluteX:
                 case Mode.AbsoluteY:
                 case Mode.Indirect:
-                    byte[] dataBytes = BitConverter.GetBytes(data);
-                    if(BitConverter.IsLittleEndian)
-                        bytes = new byte[3] { hex, dataBytes[0], dataBytes[1] };
-                    else
-                        bytes = new byte[3] { hex, dataBytes[1], dataBytes[0] };
-                    return true;
+                    return 3;
             }
 
-            return false;
+            return -1;
         } 
     }
 }
