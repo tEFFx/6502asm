@@ -13,13 +13,18 @@ namespace _6502assembler {
 
             //Add all labels as symbols
             List<string> symbols = new List<string>();
+
+            //Add user-defined symbols
             symbols.AddRange(lines.Where(x => x.Contains(":")).Select(x => x.Substring(0, x.IndexOf(":"))));
+
             Console.WriteLine("Found " + symbols.Count + " symbols");
             foreach(string symbol in symbols) {
                 Console.WriteLine(symbol);
             }
-
             Console.WriteLine("");
+
+            //Add predefined symbols
+            symbols.Add("*");
 
             ushort programCounter = START_ADDRESS;
             List<Label> labels = new List<Label>();
@@ -27,36 +32,52 @@ namespace _6502assembler {
             labels.Add(currentLabel);
 
             int lineNumber = 1;
-            foreach(string line in lines) {
-                string l = line.Replace("\t", string.Empty);
+            foreach(string currentLine in lines) {
+                string line = currentLine;
+
+                //Remove any comments
+                if(line.Contains("//"))
+                    line = line.Remove(line.IndexOf("//"));
+
+                //Is this an empty line?
+                if(!line.Any(x => x != ' ' && x != '\t'))
+                    continue;
+
+                line = line.Replace("\t", string.Empty);
 
                 //Does this line start with a label?
-                if(l.Contains(":")) {
-                    string labelName = l.Remove(l.IndexOf(":"));
+                if(line.Contains(":")) {
+                    string labelName = line.Remove(line.IndexOf(":"));
                     currentLabel = new Label(labelName, programCounter);
                     labels.Add(currentLabel);
 
-                    l = l.Substring(l.IndexOf(":") + 1);
-                    char start = l.First(x => x != ' ' && x != '\t');
-                    l = l.Substring(l.IndexOf(start));
+                    line = line.Substring(line.IndexOf(":") + 1);
+
+                    //Is this label empty?
+                    if(!line.Any(x => x != ' ' && x != '\t'))
+                        continue;
                 }
 
-                bool containsSymbol = symbols.Any(x => l.Contains(x));
+                char start = line.First(x => x != ' ' && x != '\t');
+                line = line.Substring(line.IndexOf(start));
+
+                bool containsSymbol = symbols.Any(x => line.Contains(x));
 
                 string opId;
-                if(l.Contains(" "))
-                    opId = l.Remove(l.IndexOf(" "));
+                if(line.Contains(" "))
+                    opId = line.Remove(line.IndexOf(" "));
                 else
-                    opId = l;
+                    opId = line;
 
                 OpCode opCode = OpCodes.Find(opId);
 
                 Instruction instruction;
-                OpCode.Result result = opCode.TryParse(l, containsSymbol, out instruction);
+                OpCode.Result result = opCode.TryParse(line, containsSymbol, out instruction);
 
                 if(result != OpCode.Result.Success) {
-                    Console.WriteLine(result + " on line  " + lineNumber + "\"" + l + "\"");
-                    break;
+                    Console.WriteLine(result + " on line " + lineNumber + " \"" + line + "\"");
+                    Console.ReadKey();
+                    return;
                 }
 
                 lineNumber++;
@@ -84,13 +105,31 @@ namespace _6502assembler {
                     ushort value = 0x0;
 
                     if(instruction.symbol) {
-                        //TODO: More sophisticated way of handling labels
-                        Label l = labels.First(x => x.name == instruction.data);
-                        if(instruction.mode != OpCode.Mode.Branch) {
-                            instruction.value = l.address;
-                        } else {
-                            sbyte target = (sbyte)(l.address - programCounter - 2);
-                            instruction.value = (ushort)target;
+                        switch(instruction.data) {
+                            case "*":
+                                instruction.value = programCounter;
+                                break;
+
+                            default:
+                                bool highByte = instruction.data.StartsWith(">");
+                                bool lowByte = instruction.data.StartsWith("<");
+                                if(highByte || lowByte)
+                                    instruction.data = instruction.data.Substring(1);
+
+                                //TODO: More sophisticated way of handling labels
+                                Label l = labels.First(x => x.name == instruction.data);
+                                if(instruction.mode != OpCode.Mode.Branch) {
+                                    if(!highByte && !lowByte)
+                                        instruction.value = l.address;
+                                    else if(highByte)
+                                        instruction.value = (ushort)(l.address >> 8);
+                                    else
+                                        instruction.value = (ushort)(l.address & 0x00FF);
+                                } else {
+                                    sbyte target = (sbyte)(l.address - programCounter - 2);
+                                    instruction.value = (ushort)target;
+                                }
+                                break;
                         }
                     } 
 
